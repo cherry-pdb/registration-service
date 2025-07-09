@@ -1,23 +1,54 @@
-﻿version: '3.8'
+﻿version: "3.8"
 
 services:
-  register-service:
-    image: service
-    build:
-      context: .
-      dockerfile: Service/Dockerfile
-    depends_on:
-      - db
-  db:
+  # -----------------------------------
+  # БД: Postgres, скрипт инициализации
+  # -----------------------------------
+  db-postgres:
     image: postgres:latest
+    hostname: postgres
+    container_name: db-postgres
+    restart: always
     environment:
       POSTGRES_DB: FreeVoteDb
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "1234:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+
+  init-db:
+    image: postgres:latest
+    depends_on:
+      - db-postgres
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    entrypoint: ["sh", "-c", "until pg_isready -h db-postgres -U postgres; do sleep 1; done; psql -h db-postgres -U postgres -d FreeVoteDb -f /docker-entrypoint-initdb.d/init_db.sql"]
+
+  # -----------------------------------
+  # Сервис
+  # -----------------------------------
+  registration-service:
+    image: service
+    container_name: service
+    restart: always
+    build:
+      context: .
+      dockerfile: Service/Dockerfile
+    volumes:
+      - "./Service/appsettings.json:/app/appsettings.json"
+    ports:
+      - "12345:8080"
+    depends_on:
+      - db-postgres
+
+networks:
+  default:
+    external: true
+    name: free-vote-network
 
 volumes:
   pgdata:

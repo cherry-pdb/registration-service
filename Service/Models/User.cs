@@ -2,9 +2,11 @@ namespace Service.Models;
 
 public class User
 {
-    public Guid Id { get; set; }
+    public string Id { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Password { get; set; } = string.Empty;
     
-    public string Name { get; set; }
-    
-    public bool IsVerified { get; set; }
+    public bool IsVerified { get; set; } = false;
 }

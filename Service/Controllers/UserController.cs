@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using Service.DbContext;
+using Service.Helpers;
+using Service.Interfaces;
 using Service.Models;
 
 namespace Service.Controllers;
@@ -9,11 +10,11 @@ namespace Service.Controllers;
 public class UserController : ControllerBase
 {
     private readonly ILogger<UserController> _logger;
-    private readonly UserDbContext _db;
+    private readonly IUserRepository _userRepository;
 
-    public UserController(ILogger<UserController> logger, UserDbContext db)
+    public UserController(ILogger<UserController> logger, IUserRepository userRepository)
     {
-        _db = db;
+        _userRepository = userRepository;
         _logger = logger;
     }
     
@@ -21,28 +22,27 @@ public class UserController : ControllerBase
     [Route("register")]
     public async Task<IActionResult> Register([FromBody] User user)
     {
-        user.Id = Guid.NewGuid();
+        user.Id = Guid.NewGuid().ToString();
+        user.Password = PasswordHasher.HashPassword(user.Password);
         user.IsVerified = false;
 
-        await _db.Users.AddAsync(user);
-        await _db.SaveChangesAsync();
-
-        return Ok("User registered successfully.");
+        await _userRepository.AddUserAsync(user);
+        
+        return Ok($"User {user.Id} registered successfully.");
     }
 
     [HttpPost]
     [Route("verify")]
     public async Task<IActionResult> Verify([FromBody] VerificationRequest request)
     {
-        var user = await _db.Users.FindAsync(request.UserId);
+        var user = await _userRepository.FindUserAsync(request.UserId);
 
         if (user is null)
             return NotFound("User not found.");
-        
-        // TODO: какая-то проверка, жду сервака от Айка
-        user.IsVerified = true;
-        await _db.SaveChangesAsync();
 
-        return Ok("User documents verified successfully.");
+        // TODO: какая-то логика от Айка
+        await _userRepository.UpdateUserVerifyingAsync(request.UserId);
+        
+        return Ok($"User {user.Id} documents verified successfully.");
     }
 }
