@@ -5,6 +5,7 @@ using Service.Models;
 
 namespace Service.Controllers;
 
+[Obsolete]
 [ApiController]
 [Route("api/[controller]")]
 public class UserController : ControllerBase
