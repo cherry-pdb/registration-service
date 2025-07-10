@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Options;
 using Service.Models;
 using Service.Interfaces;
 using Service.Helpers;
@@ -11,21 +12,17 @@ namespace Service.Controllers;
 [Route("oauth")]
 public class OAuthController : ControllerBase
 {
-    // In-memory хранилище для прототипа
-    private static ConcurrentDictionary<string, string> Codes = new(); // code -> userId
-    private static ConcurrentDictionary<string, string> Tokens = new(); // access_token -> userId
-    // In-memory список клиентов: client_id -> client_secret
-    private static readonly Dictionary<string, string> Clients = new()
-    {
-        { "demo-client-id", "demo-client-secret" }
-    };
-    private readonly IConfiguration _configuration;
+    private static readonly ConcurrentDictionary<string, string> Codes = new(); // code -> userId
+    private static readonly ConcurrentDictionary<string, string> Tokens = new(); // access_token -> userId
+    private static Dictionary<string, string> _clients = new(); // client_id -> client_secret
+    private readonly OAuthOptions _oauthOptions;
     private readonly IUserRepository _userRepository;
 
-    public OAuthController(IUserRepository userRepository, IConfiguration configuration)
+    public OAuthController(IUserRepository userRepository, IOptions<OAuthOptions> oauthOptions)
     {
         _userRepository = userRepository;
-        _configuration = configuration;
+        _oauthOptions = oauthOptions.Value;
+        _clients = _oauthOptions.Clients.ToDictionary(c => c.ClientId, c => c.ClientSecret);
     }
 
     [HttpGet]
@@ -35,47 +32,44 @@ public class OAuthController : ControllerBase
         // [FromQuery] string redirectUri,
         [FromQuery] string userId = "")
     {
-        var redirectUri = _configuration.GetSection("OAuthOptions").GetSection("RedirectUrl").Value;
-        var responseType = _configuration.GetSection("OAuthOptions").GetSection("ResponseType").Value;
-        var state = _configuration.GetSection("OAuthOptions").GetSection("State").Value;
+        if (_oauthOptions.Clients.All(c => c.ClientId != clientId))
+            return NotFound($"Client {clientId} not found.");
         
         if (string.IsNullOrEmpty(userId))
         {
-            var htmlPath = Path.Combine(Directory.GetCurrentDirectory(), "html", "form.htm");
+            var htmlPath = Path.Combine(Directory.GetCurrentDirectory(), "html", "form.html");
             var html = System.IO.File.ReadAllText(htmlPath);
             html = html.Replace("{{client_id}}", clientId);
-            html = html.Replace("{{redirect_uri}}", redirectUri);
-            html = html.Replace("{{response_type}}", responseType);
-            html = html.Replace("{{state}}", state);
+            html = html.Replace("{{redirect_uri}}", _oauthOptions.RedirectUrl);
+            html = html.Replace("{{response_type}}", _oauthOptions.ResponseType);
+            html = html.Replace("{{state}}", _oauthOptions.State);
+            
             return Content(html, "text/html");
         }
             
         var code = GenerateCode();
-        var uri = $"{redirectUri}?code={code}&state={state}";
+        var uri = $"{_oauthOptions.RedirectUrl}?code={code}&state={_oauthOptions.State}";
         Codes[code] = userId;
             
         return Redirect(uri);
     }
 
-    // 2. /oauth/token (POST, application/x-www-form-urlencoded)
     [HttpPost]
     [Route("token")]
     public IActionResult Token(
         [FromForm] string code,
         [FromForm] string clientId,
         [FromForm] string clientSecret,
-        [FromForm] string redirectUri,
+        [FromForm] string redirectUri = "http://localhost:12345/callback",
         [FromForm] string grantType = "authorization_code")
     {
         if (grantType != "authorization_code")
             return BadRequest("grant_type должен быть 'authorization_code'");
         
-        if (!Clients.TryGetValue(clientId, out var expectedSecret) || expectedSecret != clientSecret)
+        if (!_clients.TryGetValue(clientId, out var expectedSecret) || expectedSecret != clientSecret)
             return BadRequest("Неверные client_id или client_secret");
-        
-        var allowedRedirectUri = _configuration.GetSection("OAuthOptions").GetSection("RedirectUrl").Value;
-        
-        if (redirectUri != allowedRedirectUri)
+
+        if (redirectUri != _oauthOptions.RedirectUrl)
             return BadRequest("Недопустимый redirect_uri");
         
         if (!Codes.TryRemove(code, out var userId))
@@ -107,7 +101,7 @@ public class OAuthController : ControllerBase
         if (!Tokens.TryGetValue(token, out var userId))
             return Unauthorized();
             
-        return Ok(new { sub = userId });
+        return Ok(new { userId });
     }
 
     // 4. /oauth/register (POST)
@@ -129,13 +123,18 @@ public class OAuthController : ControllerBase
     [Route("config")]
     public IActionResult Config([FromQuery] string? redirectUrl = null)
     {
+        // var auth = Request.Headers.Authorization.ToString();
+        //     
+        // if (string.IsNullOrEmpty(auth) || !auth.StartsWith("Bearer "))
+        //     return Unauthorized();
+
         var config = new
         {
-            client_id = "demo-client-id",
-            client_secret = "demo-client-secret",
+            client_id = _oauthOptions.Clients.First().ClientId,
+            client_secret = _oauthOptions.Clients.First().ClientSecret,
             authorization_endpoint = Url.ActionLink("Authorize", "OAuth", null, Request.Scheme),
             token_endpoint = Url.ActionLink("Token", "OAuth", null, Request.Scheme),
-            redirect_url = redirectUrl ?? "http://localhost:12345/callback"
+            redirect_url = redirectUrl ?? _oauthOptions.RedirectUrl
         };
             
         return Ok(config);
@@ -151,11 +150,23 @@ public class OAuthController : ControllerBase
 
     private static string GenerateCode()
     {
-        return Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-    }
+        var codeBytes = RandomNumberGenerator.GetBytes(32);
+        var base64UrlCode = Convert.ToBase64String(codeBytes)
+            .Replace("+", "-")
+            .Replace("/", "_")
+            .Replace("=", "");
         
+        return base64UrlCode;
+    }
+
     private static string GenerateToken()
     {
-        return Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        var tokenBytes = RandomNumberGenerator.GetBytes(32);
+        var base64UrlToken = Convert.ToBase64String(tokenBytes)
+            .Replace("+", "-")
+            .Replace("/", "_")
+            .Replace("=", "");
+        
+        return base64UrlToken;
     }
 }

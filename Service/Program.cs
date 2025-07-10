@@ -1,5 +1,6 @@
 using Microsoft.OpenApi.Models;
 using Service.Interfaces;
+using Service.Models;
 using Service.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,6 +22,8 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RegistrationService API", Version = "v1" });
 });
+
+builder.Services.Configure<OAuthOptions>(builder.Configuration.GetSection(nameof(OAuthOptions)));
 
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddAuthorization();

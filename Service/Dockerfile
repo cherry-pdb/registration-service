@@ -21,4 +21,5 @@ RUN dotnet publish "Service.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:U
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+COPY Service/html/ html/
 ENTRYPOINT ["dotnet", "Service.dll"]
